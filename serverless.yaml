@@ -11,7 +11,7 @@ custom:
   stage:  ${opt:stage, 'dev'}           # dev | prod | anything
   region: ${opt:region, 'us-east-1'}
 
-  # keep the SSM path here so it’s NOT nested in provider.environment
+  # keep the SSM path here so it's NOT nested in provider.environment
   jwtPath: /moving-company/${self:custom.stage}/jwt-secret
 
 provider:
@@ -25,7 +25,7 @@ provider:
   environment:
     QUOTES_TABLE: moving-quotes-${self:provider.stage}
     USERS_TABLE:  moving-users-${self:provider.stage}
-    JWT_SECRET:   ${ssm:${self:custom.jwtPath}~true}
+    JWT_SECRET:   ${ssm:/moving-company/${self:custom.stage}/jwt-secret}
 
   iamRoleStatements:
     - Effect: Allow
@@ -34,9 +34,11 @@ provider:
         - dynamodb:PutItem
         - dynamodb:UpdateItem
         - dynamodb:Scan
+        - ssm:GetParameter
       Resource:
         - arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.QUOTES_TABLE}
         - arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.USERS_TABLE}
+        - arn:aws:ssm:${self:provider.region}:*:parameter/moving-company/${self:custom.stage}/*
 
 # ─────────────────────────
 #  Packaging – keep it TINY
@@ -44,14 +46,16 @@ provider:
 package:
   individually: true
   patterns:
-    - '!*'                               # start empty
+    - '!**'                              # start empty (exclude everything)
     - handlers/**                        # add app code
     - lib/**
 
     # add ONLY the runtime deps the code imports
-    - node_modules/bcryptjs/**   
-    - node_modules/jsonwebtoken/**
-    - node_modules/uuid/**
+    - 'node_modules/bcryptjs/**'   
+    - 'node_modules/jsonwebtoken/**'
+    - 'node_modules/uuid/**'
+    - 'node_modules/aws-sdk/**'
+    - '!node_modules/*/node_modules/**'  # exclude nested node_modules
 
 functions:
   createQuote:
