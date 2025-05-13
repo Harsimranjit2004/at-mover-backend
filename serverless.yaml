@@ -1,0 +1,113 @@
+service: moving-company-quote-system
+frameworkVersion: "3"
+
+plugins:
+  - serverless-offline
+
+# ─────────────────────────────────────────────────────
+#  Global stage / region switches in ONE safe place
+# ─────────────────────────────────────────────────────
+custom:
+  stage:  ${opt:stage, 'dev'}           # dev | prod | anything
+  region: ${opt:region, 'us-east-1'}
+
+  # keep the SSM path here so it’s NOT nested in provider.environment
+  jwtPath: /moving-company/${self:custom.stage}/jwt-secret
+
+provider:
+  name: aws
+  runtime: nodejs18.x
+
+  stage:   ${self:custom.stage}
+  region:  ${self:custom.region}
+  profile: ${opt:aws-profile, 'personal'}   # CLI flag → --aws-profile client
+
+  environment:
+    QUOTES_TABLE: moving-quotes-${self:provider.stage}
+    USERS_TABLE:  moving-users-${self:provider.stage}
+    JWT_SECRET:   ${ssm:${self:custom.jwtPath}~true}
+
+  iamRoleStatements:
+    - Effect: Allow
+      Action:
+        - dynamodb:GetItem
+        - dynamodb:PutItem
+        - dynamodb:UpdateItem
+        - dynamodb:Scan
+      Resource:
+        - arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.QUOTES_TABLE}
+        - arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.USERS_TABLE}
+
+# ─────────────────────────
+#  Packaging – keep it TINY
+# ─────────────────────────
+package:
+  individually: true
+  patterns:
+    - '!*'                               # start empty
+    - handlers/**                        # add app code
+    - lib/**
+
+    # add ONLY the runtime deps the code imports
+    - node_modules/bcryptjs/**   
+    - node_modules/jsonwebtoken/**
+    - node_modules/uuid/**
+
+functions:
+  createQuote:
+    handler: handlers/createQuote.handler
+    events:
+      - http:
+          path: quotes
+          method: post
+          cors: true
+
+  getQuotes:
+    handler: handlers/getQuotes.handler
+    events:
+      - http:
+          path: quotes
+          method: get
+          cors: true
+
+  updateQuoteStatus:
+    handler: handlers/updateQuoteStatus.handler
+    events:
+      - http:
+          path: quotes/{id}
+          method: put
+          cors: true
+
+  loginUser:
+    handler: handlers/loginUser.handler
+    events:
+      - http:
+          path: admin/login
+          method: post
+          cors: true
+
+resources:
+  Resources:
+    QuotesTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:provider.environment.QUOTES_TABLE}
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: id
+            AttributeType: S
+        KeySchema:
+          - AttributeName: id
+            KeyType: HASH
+
+    UsersTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:provider.environment.USERS_TABLE}
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: username
+            AttributeType: S
+        KeySchema:
+          - AttributeName: username
+            KeyType: HASH
